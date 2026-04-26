@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Industrial Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f1117;
+            color: #c8d4e8;
+            margin: 0;
+            padding: 24px 28px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 1.15rem;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #7a9acc;
+            margin: 0 0 28px;
+        }
+
+        /* ── Machine grid: exactly 4 × 2 ─────────────────────── */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 28px;
+        }
+
+        .card {
+            background: #161b25;
+            border: 1.5px solid #1e2535;
+            border-radius: 12px;
+            padding: 22px 20px 16px;
+            cursor: pointer;
+            transition: border-color 0.18s, box-shadow 0.18s;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+        }
+        .card:hover    { border-color: #2e3f58; box-shadow: 0 0 0 1px #2e3f5840; }
+        .card.active   { border-color: #3a7bd5 !important; box-shadow: 0 0 0 1px #3a7bd530; }
+        .card.has-oos  { border-color: #7a2020 !important; }
+        .card.alarm-warn { border-color: #a05a00 !important; box-shadow: 0 0 0 2px #a05a0020; }
+        .card.alarm-stop { border-color: #aa1515 !important; box-shadow: 0 0 0 3px #aa151525; cursor: default; }
+        .card.alarm-stop:hover { border-color: #aa1515 !important; box-shadow: 0 0 0 3px #aa151525; }
+
+        .card-name {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 1.8px;
+            text-transform: uppercase;
+            color: #4a6080;
+            margin-bottom: 18px;
+        }
+
+        .metrics { flex: 1; display: flex; flex-direction: column; gap: 14px; }
+
+        .metric { display: flex; flex-direction: column; gap: 3px; }
+        .metric .lbl {
+            font-size: 0.62rem;
+            font-weight: 600;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            color: #3a4e68;
+        }
+        .metric .val {
+            font-size: 1.35rem;
+            font-weight: 600;
+            color: #c8d8ee;
+            letter-spacing: 0.3px;
+        }
+        .val.oos {
+            color: #ff3b3b !important;
+            text-shadow: 0 0 10px rgba(255, 50, 50, 0.4);
+        }
+
+        /* ── Per-machine alarm indicator ──────────────────────── */
+        .alarm-indicator {
+            display: none;
+            margin-top: 16px;
+            padding: 8px 12px;
+            border-radius: 7px;
+            font-size: 0.73rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            text-align: center;
+            cursor: pointer;
+            transition: filter 0.15s;
+        }
+        .alarm-indicator:hover { filter: brightness(1.2); }
+        .alarm-indicator.alarm-warn {
+            display: block;
+            background: #2a1500;
+            border: 1px solid #c07000;
+            color: #f0a832;
+        }
+        .alarm-indicator.alarm-stop {
+            display: block;
+            background: #1e0505;
+            border: 1px solid #cc1515;
+            color: #ff7070;
+            animation: pulse-stop 1.8s ease-in-out infinite;
+        }
+        @keyframes pulse-stop {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(200, 30, 30, 0.5); }
+            50%       { box-shadow: 0 0 0 6px rgba(200, 30, 30, 0); }
+        }
+
+        /* ── Focus-mode detail panel ──────────────────────────── */
+        #detail {
+            display: none;
+            background: #161b25;
+            border: 1.5px solid #1e2535;
+            border-radius: 12px;
+            padding: 22px 24px;
+            margin-bottom: 28px;
+        }
+        #detail-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        #back-btn {
+            background: #0f1117;
+            border: 1.5px solid #1e2535;
+            color: #5a7aa8;
+            padding: 6px 16px;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            transition: border-color 0.15s, color 0.15s;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        #back-btn:hover { border-color: #3a5878; color: #8ab0d8; }
+        #detail-title {
+            flex: 1;
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #7a9acc;
+            letter-spacing: 0.3px;
+        }
+        #pause-badge {
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 3px 11px;
+            border-radius: 20px;
+            background: #0f1117;
+            color: #3a5878;
+            border: 1.5px solid #1e2535;
+            flex-shrink: 0;
+        }
+        #pause-badge.paused { background: #1e1500; color: #c89020; border-color: #806010; }
+        #detail canvas { width: 100% !important; cursor: crosshair; }
+        #chart-note { font-size: 0.68rem; color: #2e3e54; text-align: right; margin-top: 8px; }
+
+        /* ── Storico Allarmi ──────────────────────────────────── */
+        #history-section {
+            background: #161b25;
+            border: 1.5px solid #1e2535;
+            border-radius: 12px;
+            padding: 22px 24px;
+            margin-bottom: 28px;
+        }
+        .history-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .history-header h2 {
+            margin: 0;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 1.8px;
+            text-transform: uppercase;
+            color: #4a6080;
+        }
+        #alarm-count-badge {
+            padding: 3px 12px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            background: #0f1117;
+            color: #3a5878;
+            border: 1.5px solid #1e2535;
+            transition: background 0.2s, color 0.2s;
+        }
+        #alarm-count-badge.has-alarms {
+            background: #1e0808;
+            color: #e06060;
+            border-color: #6a1818;
+        }
+
+        .hist-filters {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .hist-filters label {
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #3a4e68;
+            white-space: nowrap;
+        }
+        .hist-filters select {
+            background: #0f1117;
+            color: #8aa8c8;
+            border: 1.5px solid #1e2535;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .hist-filters select:hover  { border-color: #2e4060; }
+        .hist-filters select:focus  { outline: none; border-color: #3a5878; }
+        .filter-group { display: flex; align-items: center; gap: 7px; }
+
+        #alarm-chart-wrap { margin-bottom: 22px; height: 250px; }
+        #alarm-chart-wrap canvas { height: 100% !important; }
+
+        #alarm-table-wrap { overflow-x: auto; }
+        #alarm-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+        #alarm-table thead tr { background: #0f1117; }
+        #alarm-table th {
+            text-align: left;
+            padding: 9px 14px;
+            color: #3a4e68;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #1e2535;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        #alarm-table th:hover { color: #6a8aaa; }
+        #alarm-table th.sort-asc::after  { content: ' ▲'; color: #3a7bd5; }
+        #alarm-table th.sort-desc::after { content: ' ▼'; color: #3a7bd5; }
+        #alarm-table tbody tr:nth-child(odd)  td { background: #161b25; }
+        #alarm-table tbody tr:nth-child(even) td { background: #1a2030; }
+        #alarm-table tbody tr:hover td { background: #1e2840 !important; }
+        #alarm-table td {
+            padding: 9px 14px;
+            color: #8aa0b8;
+            border-bottom: 1px solid #12161e;
+            white-space: nowrap;
+        }
+        #alarm-table td.oos-val { color: #e05050; font-weight: 600; }
+        #alarm-table td.ts-col  { color: #506070; font-size: 0.75rem; }
+        #history-empty {
+            text-align: center;
+            color: #2e3e54;
+            padding: 36px;
+            font-size: 0.85rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Industrial Monitor</h1>
+
+    <div class="grid" id="grid"></div>
+
+    <div id="detail">
+        <div id="detail-header">
+            <button id="back-btn">← Dashboard</button>
+            <h2 id="detail-title"></h2>
+            <span id="pause-badge">LIVE</span>
+        </div>
+        <canvas id="detailChart"></canvas>
+        <p id="chart-note">Asse Y: % del limite di specifica — il tooltip mostra i valori reali con unità</p>
+    </div>
+
+    <div id="history-section">
+        <div class="history-header">
+            <h2>Storico Allarmi</h2>
+            <span id="alarm-count-badge">0 allarmi</span>
+        </div>
+        <div class="hist-filters">
+            <div class="filter-group">
+                <label for="filter-machine">Macchina</label>
+                <select id="filter-machine">
+                    <option value="">Tutte</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-sensor">Sensore</label>
+                <select id="filter-sensor">
+                    <option value="">Tutti</option>
+                    <option value="Temperatura">Temperatura</option>
+                    <option value="Vacuum">Vacuum</option>
+                    <option value="Pressione">Pressione</option>
+                    <option value="Vibrazione">Vibrazione</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-days">Periodo</label>
+                <select id="filter-days">
+                    <option value="1">Ultime 24h</option>
+                    <option value="3">Ultimi 3 giorni</option>
+                    <option value="7" selected>Ultimi 7 giorni</option>
+                </select>
+            </div>
+        </div>
+        <div id="alarm-chart-wrap">
+            <canvas id="alarmBarChart"></canvas>
+        </div>
+        <div id="alarm-table-wrap">
+            <table id="alarm-table">
+                <thead>
+                    <tr>
+                        <th data-col="timestamp" style="width:14%">Timestamp</th>
+                        <th data-col="machine_name" style="width:14%">Macchina</th>
+                        <th data-col="sensor" style="width:14%">Sensore</th>
+                        <th data-col="value" style="width:20%">Valore</th>
+                        <th data-col="threshold_min" style="width:19%">Soglia Min</th>
+                        <th data-col="threshold_max" style="width:19%">Soglia Max</th>
+                    </tr>
+                </thead>
+                <tbody id="alarm-tbody"></tbody>
+            </table>
+            <p id="history-empty">Nessun allarme nel periodo selezionato.</p>
+        </div>
+    </div>
+
+    <script>
+    (() => {
+        const MAX_SAMPLES    = 50;
+        const MACHINES       = 8;
+        const PRESSURE_TYPES = {};
+
+        const LIMITS = {
+            temperature:  [0,    440],
+            vibration:    [0,    1.5],
+            vacuum:       [0,    1e-4],
+            overpressure: [1,    3.5],
+        };
+
+        // display name helper — server still sends "Bonder X"
+        const mName = id => `Macchina ${id}`;
+
+        /* ── History buffers ──────────────────────────────────── */
+        const history = {};
+        for (let i = 1; i <= MACHINES; i++) {
+            history[i] = {
+                labels: [],
+                temp: [], tempN: [],
+                pressure: [], pressureN: [],
+                vibration: [], vibrationN: [],
+                specLimit: [],
+            };
+        }
+
+        /* ── Per-machine alarm state ──────────────────────────── */
+        const alarm   = {};
+        const prevOOS = {};
+        for (let i = 1; i <= MACHINES; i++) {
+            alarm[i]   = { events: [], frozen: false, level: 0 };
+            prevOOS[i] = false;
+        }
+
+        /* ── OOS helpers ──────────────────────────────────────── */
+        function isOOS(m) {
+            if (m.temperature < LIMITS.temperature[0] || m.temperature > LIMITS.temperature[1]) return true;
+            if (m.vibration   < LIMITS.vibration[0]   || m.vibration   > LIMITS.vibration[1])   return true;
+            const pl = m.pressure_type === 'vacuum' ? LIMITS.vacuum : LIMITS.overpressure;
+            if (m.pressure < pl[0] || m.pressure > pl[1]) return true;
+            return false;
+        }
+
+        function metricOOS(m) {
+            const pl = m.pressure_type === 'vacuum' ? LIMITS.vacuum : LIMITS.overpressure;
+            return {
+                temp:  m.temperature < LIMITS.temperature[0] || m.temperature > LIMITS.temperature[1],
+                vib:   m.vibration   < LIMITS.vibration[0]   || m.vibration   > LIMITS.vibration[1],
+                press: m.pressure < pl[0] || m.pressure > pl[1],
+            };
+        }
+
+        /* ── Per-machine alarm logic ──────────────────────────── */
+        function processMachineAlarm(m) {
+            const now   = Date.now();
+            const state = alarm[m.id];
+            const oos   = isOOS(m);
+
+            if (oos && !prevOOS[m.id]) {
+                state.events.push(now);
+                state.frozen = true;
+
+                const moos = metricOOS(m);
+                if (moos.temp) {
+                    saveAlarmToDb(m, 'Temperatura', m.temperature,
+                        LIMITS.temperature[0], LIMITS.temperature[1]);
+                }
+                if (moos.press) {
+                    const pl     = m.pressure_type === 'vacuum' ? LIMITS.vacuum : LIMITS.overpressure;
+                    const sensor = m.pressure_type === 'vacuum' ? 'Vacuum' : 'Pressione';
+                    saveAlarmToDb(m, sensor, m.pressure, pl[0], pl[1]);
+                }
+                if (moos.vib) {
+                    saveAlarmToDb(m, 'Vibrazione', m.vibration,
+                        LIMITS.vibration[0], LIMITS.vibration[1]);
+                }
+            }
+            prevOOS[m.id] = oos;
+
+            const cutoff = now - 60_000;
+            while (state.events.length && state.events[0] < cutoff) state.events.shift();
+
+            const n     = state.events.length;
+            state.level = n >= 3 ? 3 : n >= 2 ? 2 : 0;
+            renderMachineAlarm(m.id);
+        }
+
+        function renderMachineAlarm(id) {
+            const state = alarm[id];
+            const el    = document.getElementById(`alarm-${id}`);
+            const card  = document.getElementById(`card-${id}`);
+
+            card.classList.remove('alarm-warn', 'alarm-stop');
+            el.className = 'alarm-indicator';
+
+            if (state.level >= 3) {
+                card.classList.add('alarm-stop');
+                el.classList.add('alarm-stop');
+                el.textContent = `⛔ STOP MANUTENTIVO — ${mName(id)}`;
+            } else if (state.level >= 2) {
+                card.classList.add('alarm-warn');
+                el.classList.add('alarm-warn');
+                el.textContent = '⚠ ANOMALIA — clicca per reset';
+            }
+        }
+
+        function resetMachine(id) {
+            const state = alarm[id];
+            state.events.length = 0;
+            state.frozen        = false;
+            state.level         = 0;
+            prevOOS[id]         = false;
+            renderMachineAlarm(id);
+            ['t', 'p', 'v'].forEach(p =>
+                document.getElementById(`${p}-${id}`)?.classList.remove('oos')
+            );
+            document.getElementById(`card-${id}`).classList.remove('has-oos');
+        }
+
+        /* ── Crosshair plugin ─────────────────────────────────── */
+        Chart.register({
+            id: 'crosshair',
+            afterEvent(chart, { event: e }) {
+                chart._hoverX = e.type === 'mousemove' ? e.x : null;
+            },
+            afterDraw(chart) {
+                if (chart._hoverX == null) return;
+                const { ctx, chartArea: { top, bottom } } = chart;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(chart._hoverX, top);
+                ctx.lineTo(chart._hoverX, bottom);
+                ctx.strokeStyle = 'rgba(160,190,230,0.18)';
+                ctx.lineWidth   = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.restore();
+            },
+        });
+
+        /* ── Build machine cards ──────────────────────────────── */
+        const grid = document.getElementById('grid');
+        for (let i = 1; i <= MACHINES; i++) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.id        = `card-${i}`;
+            card.innerHTML = `
+                <div class="card-name">${mName(i)}</div>
+                <div class="metrics">
+                    <div class="metric">
+                        <span class="lbl">Temperatura</span>
+                        <span class="val" id="t-${i}">-- °C</span>
+                    </div>
+                    <div class="metric">
+                        <span class="lbl" id="plbl-${i}">Pressione</span>
+                        <span class="val" id="p-${i}">--</span>
+                    </div>
+                    <div class="metric">
+                        <span class="lbl">Vibrazione</span>
+                        <span class="val" id="v-${i}">-- g</span>
+                    </div>
+                </div>
+                <div class="alarm-indicator" id="alarm-${i}"></div>`;
+
+            card.querySelector('.alarm-indicator').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const state = alarm[i];
+                if (state.level >= 3) {
+                    if (!confirm(`Manutenzione completata su ${mName(i)}?`)) return;
+                }
+                resetMachine(i);
+            });
+
+            card.addEventListener('click', () => toggleDetail(i));
+            grid.appendChild(card);
+        }
+
+        /* ── Focus-mode detail panel ──────────────────────────── */
+        let activeMachine = null;
+        let detailChart   = null;
+        let chartPaused   = false;
+        let onEnter       = null;
+        let onLeave       = null;
+
+        function enterFocus(id) {
+            document.getElementById('grid')           .style.display = 'none';
+            document.getElementById('history-section').style.display = 'none';
+            document.getElementById('detail')         .style.display = 'block';
+            const pt = PRESSURE_TYPES[id] ?? 'vacuum';
+            document.getElementById('detail-title').textContent =
+                `${mName(id)} — ${pt === 'vacuum' ? 'Vacuum' : 'Overpressure'} — ultimi ${MAX_SAMPLES} campioni`;
+        }
+
+        function exitFocus(id) {
+            document.getElementById('detail')         .style.display = 'none';
+            document.getElementById('grid')           .style.display = 'grid';
+            document.getElementById('history-section').style.display = 'block';
+            if (id != null) document.getElementById(`card-${id}`).classList.remove('active');
+            if (detailChart) { detailChart.destroy(); detailChart = null; }
+            activeMachine = null;
+            chartPaused   = false;
+        }
+
+        document.getElementById('back-btn').addEventListener('click', () => {
+            exitFocus(activeMachine);
+        });
+
+        function toggleDetail(id) {
+            if (activeMachine === id) { exitFocus(id); return; }
+            if (activeMachine != null) {
+                document.getElementById(`card-${activeMachine}`).classList.remove('active');
+                if (detailChart) { detailChart.destroy(); detailChart = null; }
+            }
+            activeMachine = id;
+            chartPaused   = false;
+            document.getElementById(`card-${id}`).classList.add('active');
+            enterFocus(id);
+            buildChart(id);
+        }
+
+        function setPaused(val) {
+            chartPaused = val;
+            const badge = document.getElementById('pause-badge');
+            badge.textContent = val ? 'IN PAUSA' : 'LIVE';
+            badge.classList.toggle('paused', val);
+        }
+
+        function buildChart(id) {
+            if (detailChart) { detailChart.destroy(); detailChart = null; }
+            const h      = history[id];
+            const canvas = document.getElementById('detailChart');
+
+            if (onEnter) canvas.removeEventListener('mouseenter', onEnter);
+            if (onLeave) canvas.removeEventListener('mouseleave', onLeave);
+
+            onEnter = () => setPaused(true);
+            onLeave = () => {
+                setPaused(false);
+                if (detailChart) { detailChart._hoverX = null; detailChart.update(); }
+            };
+            canvas.addEventListener('mouseenter', onEnter);
+            canvas.addEventListener('mouseleave', onLeave);
+
+            const ptype      = PRESSURE_TYPES[id] ?? 'vacuum';
+            const pressLabel = ptype === 'vacuum' ? 'Pressione Vacuum (mBar)' : 'Pressione (Bar)';
+
+            const gridColor   = '#1e2535';
+            const tickColor   = '#3a4e68';
+
+            detailChart = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: h.labels,
+                    datasets: [
+                        {
+                            label: 'Temperatura (°C)',
+                            data: h.tempN,
+                            borderColor: '#ff6b6b',
+                            backgroundColor: 'rgba(255,100,100,0.06)',
+                            tension: 0.3, pointRadius: 2, pointHoverRadius: 5, fill: true,
+                        },
+                        {
+                            label: pressLabel,
+                            data: h.pressureN,
+                            borderColor: '#4ecdc4',
+                            backgroundColor: 'rgba(78,205,196,0.06)',
+                            tension: 0.3, pointRadius: 2, pointHoverRadius: 5, fill: true,
+                        },
+                        {
+                            label: 'Vibrazione (g)',
+                            data: h.vibrationN,
+                            borderColor: '#f0c040',
+                            backgroundColor: 'rgba(240,192,64,0.06)',
+                            tension: 0.3, pointRadius: 2, pointHoverRadius: 5, fill: true,
+                        },
+                        {
+                            label: '_spec',
+                            data: h.specLimit,
+                            borderColor: 'rgba(160,190,230,0.15)',
+                            borderDash: [6, 4],
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            hoverRadius: 0,
+                            fill: false,
+                        },
+                    ],
+                },
+                options: {
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: {
+                            ticks: { color: tickColor, maxTicksLimit: 10 },
+                            grid:  { color: gridColor },
+                        },
+                        y: {
+                            min: 0, max: 130,
+                            ticks: { color: tickColor, callback: v => v + ' %' },
+                            grid:  { color: gridColor },
+                        },
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#5a7898',
+                                filter: item => item.text !== '_spec',
+                            },
+                        },
+                        tooltip: {
+                            filter: item => item.dataset.label !== '_spec',
+                            backgroundColor: '#0f1117',
+                            borderColor: '#1e2535',
+                            borderWidth: 1,
+                            titleColor: '#4a6888',
+                            bodyColor: '#a0b8d0',
+                            padding: 12,
+                            callbacks: {
+                                title: items => `Ora: ${items[0].label}`,
+                                label: item => {
+                                    const idx = item.dataIndex;
+                                    const h   = history[activeMachine];
+                                    const pt  = PRESSURE_TYPES[activeMachine];
+                                    switch (item.datasetIndex) {
+                                        case 0: {
+                                            const v   = h.temp[idx];
+                                            const oos = v < LIMITS.temperature[0] || v > LIMITS.temperature[1];
+                                            return ` Temp: ${v.toFixed(1)} °C${oos ? '  ⚠ FUORI SPEC' : ''}`;
+                                        }
+                                        case 1: {
+                                            const v   = h.pressure[idx];
+                                            const pl  = pt === 'vacuum' ? LIMITS.vacuum : LIMITS.overpressure;
+                                            const oos = v < pl[0] || v > pl[1];
+                                            const fmt = pt === 'vacuum'
+                                                ? v.toExponential(2) + ' mBar'
+                                                : v.toFixed(2) + ' Bar';
+                                            return ` Pressione: ${fmt}${oos ? '  ⚠ FUORI SPEC' : ''}`;
+                                        }
+                                        case 2: {
+                                            const v   = h.vibration[idx];
+                                            const oos = v > LIMITS.vibration[1];
+                                            return ` Vibrazione: ${v.toFixed(2)} g${oos ? '  ⚠ FUORI SPEC' : ''}`;
+                                        }
+                                        default: return null;
+                                    }
+                                },
+                                afterLabel: item => {
+                                    if (item.datasetIndex > 2) return null;
+                                    return ` (${item.formattedValue} % spec)`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        /* ── Polling ──────────────────────────────────────────── */
+        function fmtPressure(m) {
+            return m.pressure_type === 'vacuum'
+                ? m.pressure.toExponential(2) + ' mBar'
+                : m.pressure.toFixed(2) + ' Bar';
+        }
+
+        function normalize(val, lo, hi) {
+            return +((val - lo) / (hi - lo) * 100).toFixed(2);
+        }
+
+        async function fetchData() {
+            try {
+                const res      = await fetch('/api/data');
+                const machines = await res.json();
+                const time     = new Date().toLocaleTimeString();
+
+                machines.forEach(m => {
+                    PRESSURE_TYPES[m.id] = m.pressure_type;
+                    const plblEl = document.getElementById(`plbl-${m.id}`);
+                    if (plblEl) plblEl.textContent = m.pressure_type === 'vacuum' ? 'Vacuum' : 'Overpressure';
+
+                    processMachineAlarm(m);
+
+                    if (alarm[m.id].frozen) return;
+
+                    const tEl = document.getElementById(`t-${m.id}`);
+                    const pEl = document.getElementById(`p-${m.id}`);
+                    const vEl = document.getElementById(`v-${m.id}`);
+
+                    tEl.textContent = `${m.temperature.toFixed(1)} °C`;
+                    pEl.textContent = fmtPressure(m);
+                    vEl.textContent = `${m.vibration.toFixed(2)} g`;
+
+                    const oos = metricOOS(m);
+                    tEl.classList.toggle('oos', oos.temp);
+                    pEl.classList.toggle('oos', oos.press);
+                    vEl.classList.toggle('oos', oos.vib);
+                    document.getElementById(`card-${m.id}`)
+                        .classList.toggle('has-oos', oos.temp || oos.press || oos.vib);
+
+                    const h    = history[m.id];
+                    const pmin = m.pressure_type === 'vacuum' ? LIMITS.vacuum[0]       : LIMITS.overpressure[0];
+                    const pmax = m.pressure_type === 'vacuum' ? LIMITS.vacuum[1]       : LIMITS.overpressure[1];
+
+                    h.labels.push(time);
+                    h.temp.push(m.temperature);
+                    h.tempN.push(normalize(m.temperature, LIMITS.temperature[0], LIMITS.temperature[1]));
+                    h.pressure.push(m.pressure);
+                    h.pressureN.push(normalize(m.pressure, pmin, pmax));
+                    h.vibration.push(m.vibration);
+                    h.vibrationN.push(normalize(m.vibration, LIMITS.vibration[0], LIMITS.vibration[1]));
+                    h.specLimit.push(100);
+
+                    if (h.labels.length > MAX_SAMPLES) {
+                        ['labels','temp','tempN','pressure','pressureN','vibration','vibrationN','specLimit']
+                            .forEach(k => h[k].shift());
+                    }
+                });
+
+                if (detailChart && !chartPaused) detailChart.update();
+            } catch (e) {
+                console.error('Fetch error:', e);
+            }
+        }
+
+        /* ── Alarm DB save ────────────────────────────────────── */
+        let reloadTimer = null;
+
+        async function saveAlarmToDb(m, sensor, value, threshMin, threshMax) {
+            try {
+                await fetch('/api/alarms/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        machine_id:    m.id,
+                        machine_name:  m.name,
+                        sensor,
+                        value,
+                        threshold_min: threshMin,
+                        threshold_max: threshMax,
+                    }),
+                });
+                clearTimeout(reloadTimer);
+                reloadTimer = setTimeout(loadAlarmHistory, 800);
+            } catch (e) {
+                console.error('Failed to save alarm:', e);
+            }
+        }
+
+        /* ── Alarm history section ────────────────────────────── */
+        let allAlarms    = [];
+        let historyChart = null;
+        let sortState    = { col: 'timestamp', dir: 'desc' };
+
+        const filterMachineEl = document.getElementById('filter-machine');
+        for (let i = 1; i <= MACHINES; i++) {
+            const opt = document.createElement('option');
+            opt.value       = String(i);
+            opt.textContent = mName(i);
+            filterMachineEl.appendChild(opt);
+        }
+
+        document.getElementById('filter-days')   .addEventListener('change', loadAlarmHistory);
+        document.getElementById('filter-machine').addEventListener('change', renderHistory);
+        document.getElementById('filter-sensor') .addEventListener('change', renderHistory);
+
+        document.querySelectorAll('#alarm-table th[data-col]').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                sortState.dir = sortState.col === col && sortState.dir === 'asc' ? 'desc' : 'asc';
+                sortState.col = col;
+                renderHistory();
+            });
+        });
+
+        async function loadAlarmHistory() {
+            const days = document.getElementById('filter-days').value;
+            try {
+                const res = await fetch(`/api/alarms?days=${days}`);
+                allAlarms = await res.json();
+                renderHistory();
+            } catch (e) {
+                console.error('Failed to load alarm history:', e);
+            }
+        }
+
+        function getFiltered() {
+            const machineF = document.getElementById('filter-machine').value;
+            const sensorF  = document.getElementById('filter-sensor').value;
+            return allAlarms.filter(a => {
+                if (machineF && String(a.machine_id) !== machineF) return false;
+                if (sensorF  && a.sensor !== sensorF)              return false;
+                return true;
+            });
+        }
+
+        function fmtAlarmValue(a) {
+            if (a.sensor === 'Temperatura') return `${a.value.toFixed(1)} °C`;
+            if (a.sensor === 'Vibrazione')  return `${a.value.toFixed(2)} g`;
+            if (a.sensor === 'Vacuum')      return `${Number(a.value).toExponential(2)} mBar`;
+            return `${a.value.toFixed(2)} Bar`;
+        }
+
+        function fmtThreshold(v, sensor) {
+            if (sensor === 'Temperatura') return `${Number(v).toFixed(0)} °C`;
+            if (sensor === 'Vibrazione')  return `${Number(v).toFixed(2)} g`;
+            if (sensor === 'Vacuum')      return v === 0 ? '0' : `${Number(v).toExponential(2)} mBar`;
+            return `${Number(v).toFixed(2)} Bar`;
+        }
+
+        function renderHistory() {
+            const filtered = getFiltered();
+
+            // badge
+            const badge = document.getElementById('alarm-count-badge');
+            badge.textContent = `${filtered.length} allarme${filtered.length !== 1 ? 'i' : ''}`;
+            badge.classList.toggle('has-alarms', filtered.length > 0);
+
+            // sort
+            const { col, dir } = sortState;
+            const sign = dir === 'asc' ? 1 : -1;
+            filtered.sort((a, b) => {
+                const av = a[col] ?? '';
+                const bv = b[col] ?? '';
+                if (typeof av === 'number') return (av - bv) * sign;
+                return String(av).localeCompare(String(bv)) * sign;
+            });
+
+            // sort indicators
+            document.querySelectorAll('#alarm-table th[data-col]').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.col === col) th.classList.add(`sort-${dir}`);
+            });
+
+            // table
+            const tbody = document.getElementById('alarm-tbody');
+            const empty = document.getElementById('history-empty');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '';
+                empty.style.display = 'block';
+            } else {
+                empty.style.display = 'none';
+                tbody.innerHTML = filtered.map(a => {
+                    const ts      = new Date(a.timestamp).toLocaleString('it-IT');
+                    const dispName = a.machine_name.replace('Bonder', 'Macchina');
+                    return `<tr>
+                        <td class="ts-col">${ts}</td>
+                        <td>${dispName}</td>
+                        <td>${a.sensor}</td>
+                        <td class="oos-val">${fmtAlarmValue(a)}</td>
+                        <td>${fmtThreshold(a.threshold_min, a.sensor)}</td>
+                        <td>${fmtThreshold(a.threshold_max, a.sensor)}</td>
+                    </tr>`;
+                }).join('');
+            }
+
+            renderHistoryChart(filtered);
+        }
+
+        function renderHistoryChart(filtered) {
+            const counts = Array.from({ length: MACHINES }, (_, i) =>
+                filtered.filter(a => a.machine_id === i + 1).length
+            );
+            const labels = Array.from({ length: MACHINES }, (_, i) => `M${i + 1}`);
+
+            if (historyChart) {
+                historyChart.data.datasets[0].data = counts;
+                historyChart.update();
+                return;
+            }
+
+            const ctx = document.getElementById('alarmBarChart').getContext('2d');
+            historyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Allarmi',
+                        data: counts,
+                        backgroundColor: 'rgba(170, 50, 50, 0.55)',
+                        borderColor: '#cc3535',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }],
+                },
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#3a4e68' }, grid: { color: '#1e2535' } },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#3a4e68', stepSize: 1, precision: 0 },
+                            grid: { color: '#1e2535' },
+                        },
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#0f1117',
+                            borderColor: '#1e2535',
+                            borderWidth: 1,
+                            titleColor: '#4a6888',
+                            bodyColor: '#8aa8c8',
+                            callbacks: {
+                                title: items => mName(items[0].dataIndex + 1),
+                                label: item => ` ${item.raw} allarme${item.raw !== 1 ? 'i' : ''}`,
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        fetchData();
+        setInterval(fetchData, 2000);
+        loadAlarmHistory();
+    })();
+    </script>
+</body>
+</html>
