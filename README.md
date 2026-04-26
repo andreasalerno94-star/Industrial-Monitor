@@ -1,3 +1,4 @@
+![Dashboard](dashboard.png)
 # Industrial Monitor Dashboard
 
 Real-time monitoring dashboard for industrial wire bonding machines, built with Python Flask and Chart.js.
