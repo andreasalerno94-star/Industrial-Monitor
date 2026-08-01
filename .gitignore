@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 alarms.db
+.DS_Store
+.env

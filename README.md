@@ -19,18 +19,56 @@ Industrial Monitor simulates and visualizes sensor data from 8 machines in real 
 
 ## Tech Stack
 
-- **Backend:** Python, Flask, SQLite
+- **Backend:** Python, Flask, SQLite, Gunicorn
 - **Frontend:** HTML, CSS, JavaScript, Chart.js
 - **Architecture:** REST API + polling frontend
+- **Deployment:** Docker, Docker Compose
 
 ## How to Run
 
+### With Docker (recommended)
+
 ```bash
-pip3 install flask
+docker volume create alarms-data
+docker compose up -d --build
+```
+
+Then open `http://localhost:8080` in your browser.
+
+Alarm history is persisted in a named Docker volume mounted at `/data`, so it
+survives container restarts and rebuilds. Configuration (`DB_PATH`, `PORT`) is
+injected via environment variables, so the same image runs unchanged in any
+environment.
+
+Useful commands:
+
+```bash
+docker compose ps        # status + healthcheck state
+docker compose logs -f   # follow logs
+docker compose down      # stop and remove (volume is kept)
+```
+
+### Locally (development)
+
+```bash
+pip3 install -r requirements.txt
 python3 app.py
 ```
 
 Then open `http://127.0.0.1:5000` in your browser.
+On macOS port 5000 is used by AirPlay Receiver — use `PORT=5001 python3 app.py`
+if it is occupied.
+
+## Container Design Notes
+
+- **Slim base image** (`python:3.12-slim`) to reduce image size and attack surface
+- **Non-root runtime user** following least-privilege principles
+- **Layer-cache-friendly build**: dependencies are copied and installed before
+  application code, so code changes do not invalidate the `pip install` layer
+- **Pinned dependency versions** for reproducible builds
+- **Healthcheck** so the orchestrator can distinguish "process running" from
+  "service actually responding"
+- **Production WSGI server** (Gunicorn) instead of the Flask development server
 
 ## Background
 

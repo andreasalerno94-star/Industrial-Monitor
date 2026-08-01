@@ -1,7 +1,8 @@
+import os
 import sqlite3
 from datetime import datetime, timedelta
 
-DB_PATH = 'alarms.db'
+DB_PATH = os.environ.get('DB_PATH', 'alarms.db')
 
 
 def init_db():

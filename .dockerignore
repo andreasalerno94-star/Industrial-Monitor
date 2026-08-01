@@ -1,0 +1,12 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+venv
+.venv
+alarms.db
+dashboard.png
+README.md
+GUIDA-DOCKER.md
